@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel</title>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+  <!-- EmailJS -->
+  <script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
+  <script>
+    (function(){
+      emailjs.init("chZDmWvuVCwblTSrf"); // ✅ EmailJS Public Key
+    })();
+  </script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      margin: 0; padding: 0;
+    }
+
+
+    /* --- Login Page --- */
+    #loginPage {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #loginPage .container {
+      background: #fff;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      width: 400px;
+    }
+    #loginPage input, #loginPage button {
+      width: 100%; padding: 12px; margin: 8px 0;
+      border: 1px solid #ddd; border-radius: 8px;
+    }
+    #loginPage button {
+      background: #4CAF50; color: white;
+      font-weight: bold; cursor: pointer;
+    }
+    #loginPage button:hover { background: #45a049; }
+
+    /* --- Admin Page --- */
+    #adminPage {
+      display: none;
+      min-height: 100vh;
+      background: #f4f6f9;
+    }
+    .topbar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 10px 20px;
+      background: #2c3e50;
+      color: white;
+    }
+    .topbar button {
+      padding: 8px 16px;
+      background: #e74c3c;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+    }
+    .requests {
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      margin-bottom: 15px;
+      padding: 15px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    .card:hover {
+      transform: scale(1.01);
+    }
+    .card .collapsed { font-weight: bold; }
+    .card .details { display: none; margin-top: 10px; }
+    .card.expanded .details { display: block; }
+    .actions {
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .actions button {
+      width: 48%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .actions button:first-child { background: #4CAF50; color: white; }
+    .actions button:last-child { background: #e74c3c; color: white; }
+
+    @media (max-width: 600px) {
+      #loginPage .container {
+        width: 90%;
+      }
+      .actions { flex-direction: column; }
+      .actions button { width: 100%; margin-bottom: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Login Page -->
+  <div id="loginPage">
+    <div class="container">
+      <h2>Admin Login</h2>
+      <input type="email" id="email" placeholder="Email">
+      <input type="password" id="password" placeholder="Password">
+      <button onclick="login()">Login</button>
+      <p id="loginMessage" style="color:red; text-align:center;"></p>
+    </div>
+  </div>
+
+  <!-- Admin Page -->
+  <div id="adminPage">
+    <div class="topbar">
+      <button onclick="logout()">Logout</button>
+    </div>
+    <div class="requests">
+      <h2>Pending Requests</h2>
+      <div id="requestsList"></div>
+    </div>
+  </div>
+
+<script>
+  // ✅ Firebase config (replace with your real App ID)
+  const firebaseConfig = {
+    apiKey: "AIzaSyCVj5leqlOEoRKN4CFu2MJjzHlDHBeL6oY",
+    authDomain: "jhpfirstapp.firebaseapp.com",
+    projectId: "jhpfirstapp",
+    storageBucket: "jhpfirstapp.appspot.com",
+    messagingSenderId: "370405490800",
+    appId: "1:370405490800:web:YOUR_REAL_APPID_HERE" // 👈 replace with actual App ID from Firebase console
+  };
+
+  // Init Firebase
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+
+  let currentAdmin = null;
+
+  // ✅ Login
+  function login() {
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value.trim();
+
+    db.collection("users")
+      .where("email", "==", email)
+      .where("password", "==", password)
+      .where("role", "==", "admin")
+      .get()
+      .then(snapshot => {
+        if (snapshot.empty) {
+          document.getElementById("loginMessage").innerText = "Invalid email or password";
+          return;
+        }
+
+        const user = snapshot.docs[0].data();
+        if (!user.approved) {
+          document.getElementById("loginMessage").innerText = "Your account is not approved yet";
+          return;
+        }
+
+        currentAdmin = user;
+        document.getElementById("loginPage").style.display = "none";
+        document.getElementById("adminPage").style.display = "block";
+
+        listenForRequests();
+      })
+      .catch(err => {
+        console.error("Login error:", err);
+        document.getElementById("loginMessage").innerText = "Login failed. Try again.";
+      });
+  }
+
+  // ✅ Logout
+  function logout() {
+    currentAdmin = null;
+    document.getElementById("adminPage").style.display = "none";
+    document.getElementById("loginPage").style.display = "flex";
+  }
+
+  // ✅ Listen for pending requests
+  function listenForRequests() {
+    const list = document.getElementById("requestsList");
+
+    db.collection("users")
+      .where("approved", "==", false)
+      .where("rejected", "==", false)
+      .onSnapshot(snapshot => {
+        list.innerHTML = "";
+
+        if (snapshot.empty) {
+          list.innerHTML = "<p>No pending requests</p>";
+          return;
+        }
+
+        snapshot.forEach(doc => {
+          const req = doc.data();
+          const id = doc.id;
+
+          const div = document.createElement("div");
+          div.classList.add("card");
+
+          div.innerHTML = `
+            <div class="collapsed">
+              ${req.firstName || ""} ${req.lastName || ""} - <i>${req.role || ""}</i>
+            </div>
+            <div class="details">
+              <p><b>Email:</b> ${req.email}</p>
+              <p><b>Mobile:</b> ${req.mobile || ""}</p>
+              <p><b>City:</b> ${req.city || ""}</p>
+              <p><b>Address:</b> ${req.address || ""}</p>
+              <p><b>CV:</b> <a href="${req.cvUri || "#"}" target="_blank">${req.cvUri ? "View CV" : "N/A"}</a></p>
+              <div class="actions">
+                <button onclick="approve('${id}', '${req.firstName} ${req.lastName}', '${req.email}')">Approve</button>
+                <button onclick="reject('${id}', '${req.firstName} ${req.lastName}', '${req.email}')">Reject</button>
+              </div>
+            </div>
+          `;
+
+          // Toggle expand/collapse
+          div.addEventListener("click", function(e) {
+            if (!e.target.closest("button")) {
+              div.classList.toggle("expanded");
+            }
+          });
+
+          list.appendChild(div);
+        });
+      });
+  }
+
+  // ✅ Approve
+  function approve(docId, name, email) {
+    db.collection("users").doc(docId).update({
+      approved: true,
+      rejected: false
+    }).then(() => {
+      sendEmail(name, email, "template_mli4tor");
+      alert(`Approved ${name}`);
+    });
+  }
+
+  // ✅ Reject
+  function reject(docId, name, email) {
+    db.collection("users").doc(docId).update({
+      approved: false,
+      rejected: true
+    }).then(() => {
+      sendEmail(name, email, "template_f22acoa");
+      alert(`Rejected ${name}`);
+    });
+  }
+
+  // ✅ EmailJS
+  function sendEmail(fullName, email, templateId) {
+    emailjs.send("service_7zdnnx8", templateId, {
+      user_name: fullName,
+      email: email
+    }, "chZDmWvuVCwblTSrf") // ✅ must include public key here
+    .then(() => {
+      console.log("✅ Email sent");
+    })
+    .catch(err => {
+      console.error("❌ Error sending email:", err);
+    });
+  }
+</script>
+</body>
+</html>
